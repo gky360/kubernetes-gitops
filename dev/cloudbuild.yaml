@@ -88,8 +88,8 @@ steps:
         EOF
         hub push origin master
     volumes:
-      - name: 'config'
-        path: /config
+      # - name: 'config'
+      #   path: /config
       - name: 'kube'
         path: /kube
 
