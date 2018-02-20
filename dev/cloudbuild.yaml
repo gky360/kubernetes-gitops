@@ -9,21 +9,21 @@ steps:
       - '.'
 
   # Retrieve and decrypt the GitHub Hub configuration.
-  - name: 'gcr.io/cloud-builders/gcloud'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        gsutil cp gs://${PROJECT_ID}-helloworld-configs/hub.enc hub.enc
-        gcloud kms decrypt \
-          --ciphertext-file hub.enc \
-          --plaintext-file /config/hub \
-          --location global \
-          --keyring ${_KMS_KEYRING} \
-          --key ${_KMS_KEY}
-    volumes:
-      - name: 'config'
-        path: /config
+  # - name: 'gcr.io/cloud-builders/gcloud'
+  #   entrypoint: 'sh'
+  #   args:
+  #     - '-c'
+  #     - |
+  #       gsutil cp gs://${PROJECT_ID}-helloworld-configs/hub.enc hub.enc
+  #       gcloud kms decrypt \
+  #         --ciphertext-file hub.enc \
+  #         --plaintext-file /config/hub \
+  #         --location global \
+  #         --keyring ${_KMS_KEYRING} \
+  #         --key ${_KMS_KEY}
+  #   volumes:
+  #     - name: 'config'
+  #       path: /config
 
   # Generate a kubeconfig file for the given GKE cluster.
   - name: 'gcr.io/cloud-builders/kubectl'
@@ -49,38 +49,41 @@ steps:
   # Clone the helloworld-infrastructure-staging repo.
   - name: 'gcr.io/hightowerlabs/hub'
     env:
-      - 'HUB_CONFIG=/config/hub'
+      # - 'HUB_CONFIG=/config/hub'
       - 'KUBECONFIG=/kube/config'
+      - 'K8S_REPONAME=kubernetes-gitops-k8s'
     entrypoint: 'sh'
     args:
       - '-c'
       - |
         ACTIVE_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)")
+        BRANCH="${_ENV}-deploy-$${SHORT_SHA}"
         hub config --global credential.https://github.com.helper /usr/local/bin/hub-credential-helper
         hub config --global hub.protocol https
         hub config --global user.email "$${ACTIVE_ACCOUNT}"
         hub config --global user.name "Google Container Builder"
-        hub clone "${_GITHUB_USERNAME}/helloworld-infrastructure-staging"
-        cd helloworld-infrastructure-staging
+        hub clone "${_GITHUB_USERNAME}/$${K8S_REPONAME}"
+        cd ${K8S_REPONAME}
+        hub checkout "$${BRANCH}"
         cat <<EOF > patch.yaml
         spec:
           template:
             spec:
               containers:
-                - name: helloworld
-                  image: gcr.io/${PROJECT_ID}/helloworld:${SHORT_SHA}
+                - name: ${_ROLE}
+                  image: gcr.io/${PROJECT_ID}/roles/${_ROLE}:${SHORT_SHA}
         EOF
         kubectl patch --local -o yaml \
-          -f kubernetes/deployments/helloworld.yaml \
+          -f kubernetes/${_ENV}/deployments/${_ROLE}.yaml \
           -p "$(cat patch.yaml)" \
-          > helloworld.yaml
-        mv helloworld.yaml kubernetes/deployments/helloworld.yaml
-        hub add kubernetes/deployments/helloworld.yaml
+          > ${_ROLE}.yaml
+        mv ${_ROLE}.yaml kubernetes/${_ENV}/deployments/${_ROLE}.yaml
+        hub add kubernetes/${_ENV}/deployments/${_ROLE}.yaml
 
         hub commit -F- <<EOF
-        Update the helloworld application
+        Update the kubernetes-gitops application in ${_ROLE}
         This commit updates the helloworld deployment container image to:
-            gcr.io/${PROJECT_ID}/helloworld:${SHORT_SHA}.
+            gcr.io/${PROJECT_ID}/roles/${_ROLE}:${SHORT_SHA}
         Build ID: ${BUILD_ID}
         EOF
         hub push origin master
@@ -91,4 +94,4 @@ steps:
         path: /kube
 
 images:
-  - 'gcr.io/${PROJECT_ID}/helloworld:${SHORT_SHA}'
+  - 'gcr.io/${PROJECT_ID}/roles/${_ROLE}:${SHORT_SHA}'
